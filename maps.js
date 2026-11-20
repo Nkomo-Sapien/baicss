@@ -14,6 +14,17 @@
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>',
   }).addTo(map);
   const routeLayer = L.layerGroup().addTo(map);
+  const reviewMapNode = $('#reviewMap');
+  let therapistMap = null, therapistLayer = null, therapistCorridor = null;
+  if (reviewMapNode) {
+    therapistMap = L.map(reviewMapNode, { zoomControl: true, scrollWheelZoom: true }).setView([-29.0, 24.0], 5);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>',
+    }).addTo(therapistMap);
+    therapistLayer = L.layerGroup().addTo(therapistMap);
+    therapistMap.whenReady(() => setTimeout(() => therapistMap.invalidateSize(), 100));
+  }
   let routePath = [], routeSteps = [], stepIndex = 0, currentPosition = null, userMarker = null, watchId = null;
   let lastGeoRequest = 0, lastOffRouteAlert = 0, startPoint = null, endPoint = null, corridorLine = null;
   let routeDistanceText = '', routeDurationText = '', routeSummaryText = '';
@@ -83,6 +94,42 @@
     corridorLine.setStyle({ weight: Math.max(3, Math.min(80, 1.5 / metersPerPixel)) });
   }
   map.on('zoomend', updateCorridorWidth);
+
+  function syncTherapistMap(state) {
+    if (!therapistMap || !therapistLayer || !state) return;
+    therapistMap.invalidateSize({ pan: false });
+    therapistLayer.clearLayers();
+    let points = [];
+    if (realRouteActive && routePath.length > 1) {
+      points = routePath.map(([lat, lon]) => [lat, lon]);
+    } else if (state.route?.length > 1) {
+      // The local demo route has no geographic coordinates. Position its illustrative
+      // overlay near the map's current center and label it clearly as a sample.
+      const center = map.getCenter();
+      const metersPerUnit = 12;
+      const latScale = metersPerUnit / 111320;
+      const lonScale = metersPerUnit / (111320 * Math.max(.2, Math.cos(center.lat * Math.PI / 180)));
+      points = state.route.map(([x, y]) => [center.lat + (4 - y) * latScale, center.lng + (x - 6) * lonScale]);
+      for (const obstacle of state.obstacles || []) {
+        const lat = center.lat + (4 - obstacle.y) * latScale;
+        const lon = center.lng + (obstacle.x - 6) * lonScale;
+        L.circleMarker([lat, lon], { radius: 7, color: '#fff', weight: 2, fillColor: '#d98d67', fillOpacity: 1 })
+          .bindTooltip(obstacle.kind || 'Reported obstacle').addTo(therapistLayer);
+      }
+    }
+    if (points.length > 1) {
+      therapistCorridor = L.polyline(points, { color: '#4caa91', weight: 20, opacity: .23, lineCap: 'round', lineJoin: 'round' }).addTo(therapistLayer);
+      const centerLine = L.polyline(points, { color: '#176d62', weight: 5, opacity: .95, lineCap: 'round', lineJoin: 'round' }).addTo(therapistLayer);
+      const first = points[0], last = points[points.length - 1];
+      L.circleMarker(first, { radius: 7, color: '#fff', weight: 3, fillColor: '#328776', fillOpacity: 1 }).bindTooltip('Route start').addTo(therapistLayer);
+      L.circleMarker(last, { radius: 7, color: '#fff', weight: 3, fillColor: '#d49c61', fillOpacity: 1 }).bindTooltip('Destination').addTo(therapistLayer);
+      // Keep the review preview at a useful neighbourhood scale. Tiny demo
+      // routes can otherwise zoom to individual OSM tiles and look like a broken map.
+      therapistMap.fitBounds(centerLine.getBounds(), { padding: [28, 28], maxZoom: realRouteActive ? 17 : 15 });
+    }
+    requestAnimationFrame(() => therapistMap.invalidateSize({ pan: false }));
+  }
+  window.syncTherapistMap = syncTherapistMap;
 
   function startLocationWatch() {
     if (!navigator.geolocation || !window.isSecureContext) return;
