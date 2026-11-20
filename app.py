@@ -4,7 +4,16 @@ from pathlib import Path
 from urllib.parse import urlparse
 import hashlib, json, math, threading, time
 import sys, os
+import base64, io
+try:
+    from ultralytics import YOLO
+    from PIL import Image
+    YOLO_MODEL = YOLO("yolov8n.pt")
+except Exception:
+    YOLO_MODEL = None
 
+INDOOR_CLASSES = {"chair", "couch", "dining table", "bench", "person", "backpack", "suitcase", "tv", "potted plant", "laptop"}
+HEIGHTS_M = {"chair": 0.85, "couch": 0.85, "dining table": 0.76, "bench": 0.50, "person": 1.68, "tv": 0.95, "backpack": 0.45, "suitcase": 0.65, "potted plant": 0.80, "laptop": 0.30}
 ROOT = Path(__file__).parent
 STORE = ROOT / "data" / "ledger.json"
 LOCK = threading.Lock()
@@ -81,6 +90,54 @@ class Handler(BaseHTTPRequestHandler):
         if p=="/api/reviews":
             review={"id":"review-"+str(int(time.time()*1000)),"routePoints":len(state["route"]),"destination":state["destination"],"decision":data.get("decision","approved"),"note":data.get("note",""),"therapist":data.get("therapist","Occupational therapist"),"time":int(time.time())}
             state["reviews"].insert(0,review); append_record("therapist_review",review); self.send_json(review,201); return
+        if p == "/api/indoor/hazard":
+            hazard = {
+                "space": data.get("space", "indoor"),
+                "kind": data.get("kind", "obstacle"),
+                "distance_m": data.get("distance_m", 0),
+                "zone": data.get("zone", "center"),
+            }
+            append_record("indoor_obstacle_detected", hazard)
+            self.send_json({"ok": True, "recorded": hazard}, 201)
+            return
+        if p == "/api/indoor/yolo":
+            if YOLO_MODEL is None:
+                self.send_json({"error": "ultralytics/PIL not installed on server"}, 503)
+                return
+            img_b64 = data.get("image_base64", "")
+            if "," in img_b64:
+                img_b64 = img_b64.split(",", 1)[1]
+            img = Image.open(io.BytesIO(base64.b64decode(img_b64))).convert("RGB")
+            img_w, img_h = img.size
+            res = YOLO_MODEL(img)[0]
+            detections = []
+            for box in res.boxes:
+                cls_name = res.names[int(box.cls[0])]
+                conf = float(box.conf[0])
+                if conf < 0.35 or cls_name not in INDOOR_CLASSES:
+                    continue
+                x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
+                w, h = max(1.0, x2 - x1), max(1.0, y2 - y1)
+                real_h = HEIGHTS_M.get(cls_name, 0.85)
+                dist_m = round(max(0.4, min(6.0, (real_h * (img_h * 0.86)) / max(h, 12.0))), 1)
+                norm_x = ((x1 + x2) / 2.0 - img_w / 2.0) / max(1.0, img_w / 2.0)
+                lat_m = round(norm_x * dist_m * 0.58, 2)
+                width_m = round(max(0.35, (w / max(1.0, img_w)) * dist_m * 1.15), 2)
+                zone = "left" if lat_m < -0.45 else ("right" if lat_m > 0.45 else "center")
+                detections.append({
+                    "label": "board/display" if cls_name == "tv" else cls_name,
+                    "score": round(conf, 2),
+                    "bbox": [x1, y1, w, h],
+                    "distanceM": dist_m,
+                    "lateralM": lat_m,
+                    "widthM": width_m,
+                    "zone": zone,
+                })
+            if detections:
+                nearest = min(detections, key=lambda d: d["distanceM"])
+                append_record("yolov8_indoor_scan", {"count": len(detections), "nearest": nearest})
+            self.send_json({"obstacles": detections, "width": img_w, "height": img_h})
+            return
         self.send_json({"error":"Not found"},404)
 
 def verify_chain():

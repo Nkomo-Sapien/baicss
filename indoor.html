@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>NAVORA · Indoor Obstruction Radar</title>
+  <link rel="stylesheet" href="/styles.css?v=navora-v3" />
+  <style>
+    .indoor-grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 16px; }
+    .cam-card, .radar-card { background: #fff; border: 1px solid #e3e8e2; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 26px rgba(17,58,53,.05); }
+    .panel-head { padding: 15px 18px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e9eeeb; }
+    .panel-head h2 { margin: 4px 0 0; font-size: 16px; color: #123d39; }
+    .viewport-box { position: relative; width: 100%; height: 340px; background: #0d2625; overflow: hidden; }
+    .viewport-box video, .viewport-box canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .guidance-banner { padding: 16px 18px; background: #0d4541; color: #fff; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+    .guidance-banner.danger { background: #8f2d22; }
+    .guidance-banner.caution { background: #9a6518; }
+    .guidance-banner strong { display: block; font-size: 16px; letter-spacing: -.2px; }
+    .guidance-banner small { color: #d5e4df; font-size: 11px; }
+    .dist-pill { background: rgba(255,255,255,.16); padding: 8px 12px; border-radius: 10px; font-weight: 800; font-size: 15px; white-space: nowrap; }
+    .controls-bar { padding: 14px 18px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; border-top: 1px solid #e9eeeb; }
+    .hazard-list { padding: 14px 18px; display: grid; gap: 8px; max-height: 170px; overflow-y: auto; border-top: 1px solid #e9eeeb; }
+    .hazard-item { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; border-radius: 9px; background: #f5f7f5; font-size: 12px; }
+    .hazard-item.near { background: #fdf0ed; border: 1px solid #f2c5bc; color: #7a2319; }
+    .hazard-item.mid { background: #fcf7ec; border: 1px solid #eed9a8; color: #6e4b10; }
+    @media (max-width: 900px) { .indoor-grid { grid-template-columns: 1fr; } .viewport-box { height: 290px; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-icon">⌖</span>NAVORA</a>
+    <div class="mode-switch">
+      <a class="mode-btn" href="/" style="text-decoration:none">Outdoor Route</a>
+      <button class="mode-btn active" type="button">Indoor Vision Radar</button>
+    </div>
+    <div class="top-actions">
+      <span class="live-dot"></span>
+      <span class="demo-tag" id="detectorStatus">CAMERA STANDBY</span>
+    </div>
+  </header>
+
+  <main style="max-width:1360px; margin:0 auto; padding:24px 18px 60px;">
+    <div class="heading-row">
+      <div>
+        <span class="eyebrow">REAL-TIME INDOOR OBSTRUCTION & POSITIONING ASSIST</span>
+        <h1>Indoor Space Detector & Safe Path Map</h1>
+        <p class="subhead">Point your phone camera forward while walking through a hall, classroom, or student center to detect chairs, tables, boards, and people, measure distance, and hear positioning guidance.</p>
+      </div>
+      <div class="pill"><span class="live-dot"></span> AUDIO + HAPTIC GUIDANCE</div>
+    </div>
+
+    <!-- Primary Guidance Banner -->
+    <div class="guidance-banner" id="guidanceBanner" style="border-radius:14px; margin-bottom:16px;">
+      <div>
+        <span class="eyebrow" style="color:#b8d6cd;">LIVE POSITIONING INSTRUCTION</span>
+        <strong id="mainInstruction">Tap "Start Camera Radar" to scan the room ahead</strong>
+        <small id="subInstruction">Keep phone held steady at chest height angled slightly downward.</small>
+      </div>
+      <div class="dist-pill" id="nearestDistBadge">-- m</div>
+    </div>
+
+    <div class="indoor-grid">
+      <!-- Left: Phone Camera + Bounding Box Overlay -->
+      <section class="cam-card">
+        <div class="panel-head">
+          <div>
+            <span class="eyebrow">PHONE CAMERA FEED</span>
+            <h2>Live Object & Distance Overlay</h2>
+          </div>
+          <span class="pill" id="fpsBadge">0 FPS</span>
+        </div>
+
+        <div class="viewport-box">
+          <video id="cameraFeed" autoplay playsinline muted></video>
+          <canvas id="cameraOverlay"></canvas>
+        </div>
+
+        <div class="controls-bar">
+          <button class="primary" id="startCamBtn" type="button">Start Camera Radar</button>
+          <button class="secondary" id="voiceToggleBtn" type="button">Voice: ON</button>
+          <select id="spacePreset" class="text-input" style="width:auto; height:42px;">
+            <option value="hall">Space: Hallway / Corridor</option>
+            <option value="classroom">Space: Classroom (Desks & Chairs)</option>
+            <option value="center">Space: Student Center / Store</option>
+          </select>
+          <button class="secondary" id="yoloScanBtn" type="button">Run YOLOv8 Scan</button>
+        </div>
+      </section>
+
+      <!-- Right: 2D Top-Down Obstacle Map & Avoidance Line -->
+      <section class="radar-card">
+        <div class="panel-head">
+          <div>
+            <span class="eyebrow">SPATIAL FLOOR RADAR (0m – 5m AHEAD)</span>
+            <h2>Obstacle Map & Avoidance Trajectory</h2>
+          </div>
+          <span class="pill" id="clearLaneBadge">CENTER LANE</span>
+        </div>
+
+        <div class="viewport-box" style="background:#eef3ee;">
+          <canvas id="spatialMapCanvas"></canvas>
+        </div>
+
+        <div class="hazard-list" id="hazardList">
+          <div class="hazard-item"><span>No obstacles scanned yet. Start camera to map room.</span></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- TensorFlow.js + COCO-SSD for instant client-side phone detection with Python YOLOv8 fallback -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+  <script src="/indoor.js"></script>
+</body>
+</html>
