@@ -1,6 +1,6 @@
-# Pathlight
+# Navora
 
-Pathlight is a responsive web app prototype for navigation through wide open spaces. It pairs a Python route API with a Node.js web server, OpenStreetMap tiles displayed with Leaflet, therapist review, voice prompts, a local tamper-evident ledger and optional on-chain commitment anchoring.
+Navora is a responsive web app prototype for navigation through wide open spaces. It pairs a Python route API with a Node.js web server, OpenStreetMap tiles displayed with Leaflet, therapist review, voice prompts, a local tamper-evident ledger and optional on-chain commitment anchoring.
 
 ## Run on your PC
 
