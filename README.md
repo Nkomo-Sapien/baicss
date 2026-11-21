@@ -42,3 +42,6 @@ For the privacy commitment, Pathlight combines each local ledger hash with a ran
 - SHA-256 chained route and review records in `data/ledger.json`, with optional salted commitments anchored to Avalanche Fuji or BNB Smart Chain Testnet.
 
 Do not rely on this prototype as a safety system or as a substitute for a mobility aid and professional assessment. Fuji is a public test network; for production, use a reviewed contract, a managed RPC, appropriate reviewer access controls and a privacy/legal review before choosing what to anchor.
+
+you may test the app on this website https://remarks-paragraph-electronics-referred.trycloudflare.com/
+
